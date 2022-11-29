@@ -1,7 +1,9 @@
 // Require the necessary discord.js classes
 require('dotenv').config();
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, Events } = require('discord.js');
 
+const fs = require('node:fs');
+const path = require('node:path');
 const { ethers } = require("ethers");
 const daobiABI = require("./abi/DaobiTokenABI.json");
 const voteABI = require("./abi/DaobiVoteABI.json");
@@ -22,6 +24,23 @@ const voteContract = new ethers.Contract(voteAddr, voteABI, provider);
 
 // Create a new client instance
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+//requirements for command handling
+client.commands = new Collection();
+const commandsPath = path.join(__dirname, 'commands');
+const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+
+//load commands from directory specified above (commands)
+for (const file of commandFiles) {
+	const filePath = path.join(commandsPath, file);
+	const command = require(filePath);
+	// Set a new item in the Collection with the key as the command name and the value as the exported module
+	if ('data' in command && 'execute' in command) {
+		client.commands.set(command.data.name, command);
+	} else {
+		console.log(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
+	}
+}
 
 function byteToUTF8(byte32) { //requires Nodejs
 	baseCharArray = byte32.split("");
@@ -46,15 +65,32 @@ client.once('ready', async () => {
 	
 	const general_channel = await client.channels.fetch(process.env.TARGET_CHANNEL);	
 	
-	console.log('Ready!');
-	general_channel.send('Ready');
+	console.log('Bot Activated');
+
+	//command listener
+	client.on(Events.InteractionCreate, async interaction => {
+		if (!interaction.isChatInputCommand()) return;
+	
+		const command = interaction.client.commands.get(interaction.commandName);
+	
+		if (!command) {
+			console.error(`No command matching ${interaction.commandName} was found.`);
+			return;
+		}
+	
+		try {
+			await command.execute(interaction);
+		} catch (error) {
+			console.error(error);
+			await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
+		}
+	});
 
 	//daobi token contract events
 	daobiContract.on("NewChancellor", async(chanc) => {
 		chancName = await alias(chanc);
 		general_channel.send(`A new chancellor is proclaimed: ${byteToUTF8(chancName)}`);
-		//console.log("New Chancellor");
-		//console.log(chanc);
+		console.log("New Chancellor: ", chanc);
 	});
 
 	daobiContract.on("DaobiMinted", (amount) => {
@@ -63,7 +99,7 @@ client.once('ready', async () => {
 			general_channel.send(`The chancellor has minted ${adjustedAmt} DAObi tokens`);
 		}
 		else general_channel.send(`The chancellor has minted ${adjustedAmt} DAObi token`);
-		//console.log("Minted: ", adjustedAmt);
+		console.log("Minted: ", adjustedAmt);
 	});
 
 	//voting events
@@ -76,12 +112,12 @@ client.once('ready', async () => {
 		voterName = await voteContract.getAlias(voter);
 		voteeName = await voteContract.getAlias(votee);
 		general_channel.send(`${byteToUTF8(voterName)} voted for ${byteToUTF8(voteeName)} for Chancellor.`);
-		//console.log("Voter: ", voterName);
+		console.log(`${byteToUTF8(voterName)} voted for ${byteToUTF8(voteeName)} for Chancellor.`);
 	});
 
 	voteContract.on("NewToken", (newMember) => {
 		general_channel.send(`A new voting token has been minted to ${newMember}`);
-		//console.log("VoteMint: ", newMember);
+		console.log("VoteMint: ", newMember);
 	});
 
 	voteContract.on("Registered", async(newMember, nickname, vote) => {
@@ -92,25 +128,28 @@ client.once('ready', async () => {
 		};
 		voteAlias = await voteContract.getAlias(info.vote);
 		general_channel.send(`${info.newMember} has registered as ${byteToUTF8(nickname)}, voting for ${byteToUTF8(voteAlias)}.`);
-		//console.log(typeof info.nickname);
+		console.log(`${info.newMember} has registered as ${byteToUTF8(nickname)}, voting for ${byteToUTF8(voteAlias)}.`);
 	});
 
 	voteContract.on("Reclused", async(recluse) => {
 		recluseName = await alias(recluse);		
-		general_channel.send(`${byteToUTF8(recluseName)}} has withdrawn from service.`);
-		//console.log("Reclused: ", recluse);
+		general_channel.send(`${byteToUTF8(recluseName)} has withdrawn from service.`);
+		console.log("Reclused: ", recluse);
 	});
 
 	voteContract.on("Burnt", (burnee) => {		
 		general_channel.send(`${burnee} has been immolated by the authorities.`);
+		console.log("AdminBurn: ", burnee);
 	});
 
 	voteContract.on("SelfBurnt", (burnee) => {		
 		general_channel.send(`${burnee} has destroyed his token of rank!`);
+		console.log("SelfBurnt: ", burnee);
 	});
 
 	voteContract.on("NFTRetarget", (newURI) => {		
 		general_channel.send(`The approved seal for voting members is now ${newURI}`);
+		console.log("NFTRetarget: ", newURI);
 	});
 
 });

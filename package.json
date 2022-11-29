@@ -11,6 +11,7 @@
   "dependencies": {
     "discord.js": "^14.5.0",
     "dotenv": "^16.0.3",
-    "ethers": "^5.7.1"
+    "ethers": "^5.7.1",
+    "find-config": "^1.0.0"
   }
 }
